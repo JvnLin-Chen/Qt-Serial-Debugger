@@ -25,8 +25,10 @@ public:
     void CloseComTest();
     void SendMsg();     //发送数据
     void ReadData();
+    QByteArray FormatData(const QString &rawText);   
+    QByteArray ParseHexData(const QString &input, bool *ok, QString *errorMsg);   //格式加工厂
 
-    bool isOpenCom;
+    //bool isOpenCom;
 
 private:
     Ui::MainWindow *ui;

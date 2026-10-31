@@ -117,7 +117,8 @@ void MainWindow::SendMsg(){
         return;
 
     //获取数据，并写入到缓存区
-    QByteArray data = ui->lineEdit_15->text().toUtf8();
+    QString rawText = ui->lineEdit_15->text();
+    QByteArray data = FormatData(rawText);
     qint64 bytesWritten = serialPort->write(data);
     if (bytesWritten == -1) {
         qDebug() << "写入失败:" << serialPort->errorString();
@@ -149,4 +150,91 @@ if (data.isEmpty()) return;
     
     // 3. (可选) 如果你想限制最多显示多少行，防止内存爆掉：
     // ui->plainTextEdit_Receive->setMaximumBlockCount(1000); // 放在构造函数里
+}
+
+// 辅助函数：把 1 个字符转为对应的 0~15 的数值
+// 如果返回 -1，说明是非法字符（比如 G, Z, 或者中文）
+int CharToHexValue(QChar c) {
+     if(c >= '0' && c <= '9'){
+        return c.unicode() - '0';  // '0'~'9' 的 ASCII 码相减直接得到数值
+     }
+     else if(c >= 'a' && c <= 'f'){
+        return c.unicode() - 'a' + 10;   //这里部分大小写，同时将a转化成 10之后
+     }
+     else if(c >= 'A' && c <= 'F'){
+        return c.unicode() - 'A' + 10;
+     }
+
+     return -1;
+}
+
+// 你的核心解析函数（修正版）
+QByteArray MainWindow::ParseHexData(const QString &input, bool *ok, QString *errorMsg) {
+        QByteArray result;
+        *ok = true;
+        errorMsg->clear();
+
+        // 第一步：清洗字符串。去掉所有的空格，方便后面两个两个地读
+        QString cleanStr = input;
+        cleanStr.remove(' ');  // 去掉空格
+
+        // 第二步：检查长度
+        if(cleanStr.isEmpty() || cleanStr.length() % 2 != 0){
+            *ok = false;
+            *errorMsg = "输入长度为空或者非偶数，无法转换成字节";
+            return QByteArray();
+        }
+
+        //第三步：逐对解析并安检
+        for(int i = 0; i < cleanStr.length();i+=2){
+            QChar highChar = cleanStr.at(i);   //高 4 位，即取两位中的第一位
+            QChar lowChar = cleanStr.at(i+1);  // 低 4 位，取两位中的第二位
+
+            int highVal = CharToHexValue(highChar);
+            int lowVal = CharToHexValue(lowChar);
+
+            // 安检：如果发现 G~Z 等非法字符
+            if (highVal == -1 || lowVal == -1) {
+                *ok = false;
+                *errorMsg = QString("包含非法字符: %1%2。十六进制仅支持 0-9 和 A-F。").arg(highChar).arg(lowChar);
+                return QByteArray(); // 一旦发现非法，立刻抛弃所有数据，拒绝发送
+            }
+
+            // 第四步：翻译与拼接 (高4位左移4位，与低4位合并)
+            unsigned char byte = (highVal << 4) | lowVal;
+            result.append(static_cast<char>(byte));
+        }
+
+    return result;
+}
+
+
+// 传入你 UI 上输入框的文本，返回加工好的真实字节流
+QByteArray MainWindow::FormatData(const QString &rawText) {
+    bool ok; 
+    QString errorMsg;
+    QByteArray processedData;
+    // 2. 判断 UI 里的 'HEX发送' 复选框是否勾选
+    // 如果勾选了，尝试用 QByteArray::fromHex 转换。
+    // 坑点：如果是非法十六进制字符（比如输入了"ZZ"），你怎么处理？直接 clear() 还是弹窗？
+    if(ui->checkBox_23->isChecked()){
+        //processedData = QByteArray::fromHex(processedData);
+        processedData = ParseHexData(rawText,&ok,&errorMsg);
+        if(ok == false){
+            QMessageBox::warning(this, "错误", errorMsg);
+            return QByteArray();  // 拦截！绝对不让任何数据走出去！
+        } 
+    }
+    else{
+        processedData = rawText.toUtf8();
+    }
+    
+    // 3. 判断 UI 里的 '发送新行' 复选框是否勾选
+    // 如果勾选，在后面 append("\r\n");
+    if(ui->checkBox_22->isChecked()){
+        processedData.append("/r/n");
+    }
+
+    // 4. 返回处理好的字节流
+    return processedData;
 }
